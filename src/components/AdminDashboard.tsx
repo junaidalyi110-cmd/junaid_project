@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { getSafeHttpUrl } from "./ActionButton";
 import Header from "./Header";
 import LinkManager from "./LinkManager";
 import VideoCard from "./VideoCard";
@@ -16,24 +15,11 @@ type UploadStatus = {
   message: string;
 };
 
-function getStoragePathFromPublicUrl(publicUrl: string) {
-  const marker = "/storage/v1/object/public/videos/";
-  const markerIndex = publicUrl.indexOf(marker);
-  if (markerIndex === -1) {
-    return null;
-  }
-  return decodeURIComponent(publicUrl.slice(markerIndex + marker.length));
-}
-
 const initialButton: EditableActionButton = {
   clientId: "first-new-button",
   label: "Play & continue",
   url: "",
 };
-
-function getSafeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-120);
-}
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -106,7 +92,7 @@ export default function AdminDashboard() {
 
     return values.map((button, position) => {
       const label = button.label.trim();
-      const url = getSafeHttpUrl(button.url);
+      const url = button.url.trim();
 
       if (!label) {
         throw new Error(`Enter a name for action button ${position + 1}.`);
@@ -121,51 +107,26 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleUpload = async ({ title, file }: VideoUploadValues) => {
+  const handleUpload = async ({ title, videoUrl }: VideoUploadValues) => {
     if (!supabase) {
       throw new Error("Supabase is not configured. Add your environment variables and restart the development server.");
     }
 
     const buttonValues = validateButtons(buttons);
     setIsUploading(true);
-    setUploadStatus({ kind: "loading", message: "Uploading video to storage…" });
-
-    const storagePath = `${crypto.randomUUID()}-${getSafeFileName(file.name)}`;
-    const { data: storageData, error: storageError } = await supabase.storage
-      .from("videos")
-      .upload(storagePath, file, {
-        cacheControl: "3600",
-        contentType: file.type,
-        upsert: false,
-      });
-
-    if (storageError || !storageData) {
-      setIsUploading(false);
-      setUploadStatus({
-        kind: "error",
-        message:
-          "The video could not be uploaded. Confirm that the videos bucket exists and its upload policy permits this request.",
-      });
-      throw new Error("Storage upload failed. Check your bucket configuration and try again.");
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from("videos")
-      .getPublicUrl(storageData.path);
-
     setUploadStatus({ kind: "loading", message: "Saving video details…" });
+
     const { data: createdVideo, error: videoError } = await supabase
       .from("videos")
-      .insert({ title, video_url: publicUrlData.publicUrl })
+      .insert({ title, video_url: videoUrl })
       .select()
       .single();
 
     if (videoError || !createdVideo) {
-      await supabase.storage.from("videos").remove([storageData.path]);
       setIsUploading(false);
       setUploadStatus({
         kind: "error",
-        message: "The video file was uploaded, but its details could not be saved. Please try again.",
+        message: "The video details could not be saved. Please try again.",
       });
       throw new Error("Video details could not be saved. Please try again.");
     }
@@ -180,10 +141,7 @@ export default function AdminDashboard() {
     );
 
     if (buttonsError) {
-      await Promise.all([
-        supabase.from("videos").delete().eq("id", createdVideo.id),
-        supabase.storage.from("videos").remove([storageData.path]),
-      ]);
+      await supabase.from("videos").delete().eq("id", createdVideo.id);
       setIsUploading(false);
       setUploadStatus({
         kind: "error",
@@ -195,7 +153,7 @@ export default function AdminDashboard() {
     setButtons([{ ...initialButton }]);
     setUploadStatus({
       kind: "success",
-      message: "Video published. Its public link is ready to share.",
+      message: "Video added. Its public link is ready to share.",
     });
     setIsUploading(false);
     await loadVideos();
@@ -266,21 +224,9 @@ export default function AdminDashboard() {
     }
 
     if (!deletedVideos || deletedVideos.length === 0) {
-      // RLS blocked the delete silently — nothing was actually removed.
       throw new Error(
-        "The video could not be deleted. You may not have permission to delete videos — check your Supabase RLS policies.",
+        "The video could not be deleted. You may not have permission — check your Supabase RLS policies.",
       );
-    }
-
-    const storagePath = getStoragePathFromPublicUrl(video.video_url);
-    if (storagePath) {
-      const { error: storageDeleteError } = await supabase.storage
-        .from("videos")
-        .remove([storagePath]);
-
-      if (storageDeleteError) {
-        console.error("Unable to remove stored video file", storageDeleteError);
-      }
     }
 
     setVideos((current) => current.filter((item) => item.id !== video.id));
@@ -292,12 +238,12 @@ export default function AdminDashboard() {
       <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:px-8 lg:py-12">
         <aside className="h-fit rounded-2xl bg-slate-950 p-6 text-white shadow-xl shadow-slate-300/50 lg:sticky lg:top-6">
           <p className="text-sm font-semibold text-indigo-300">Protected admin dashboard</p>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight">Publish a video</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight">Add a video</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Upload a video, name each customer action, and choose where the play button sends them.
+            Paste a video link, name each customer action, and choose where the play button sends them.
           </p>
           <ol className="mt-6 space-y-3 text-sm text-slate-300">
-            <li><span className="mr-2 font-bold text-white">1.</span> Add a title and video.</li>
+            <li><span className="mr-2 font-bold text-white">1.</span> Add a title and video link.</li>
             <li><span className="mr-2 font-bold text-white">2.</span> Name the play redirect and any extra buttons.</li>
             <li><span className="mr-2 font-bold text-white">3.</span> Share its public URL.</li>
           </ol>
@@ -314,7 +260,7 @@ export default function AdminDashboard() {
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="mb-6">
               <h2 className="text-xl font-bold tracking-tight text-slate-950">New video</h2>
-              <p className="mt-1 text-sm text-slate-500">Upload a video, then name the play redirect and any extra customer actions.</p>
+              <p className="mt-1 text-sm text-slate-500">Paste a video link, then name the play redirect and any extra customer actions.</p>
             </div>
             {clientError ? (
               <p className="rounded-xl bg-rose-50 p-4 text-sm text-rose-800" role="alert">{clientError}</p>
@@ -362,7 +308,7 @@ export default function AdminDashboard() {
             ) : videoListError ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-800" role="alert">{videoListError}</div>
             ) : videos.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-600">No videos yet. Upload your first video above.</div>
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-600">No videos yet. Add your first video link above.</div>
             ) : (
               <div className="space-y-4">
                 {videos.map((video) => (

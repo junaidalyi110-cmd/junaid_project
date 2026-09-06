@@ -1,136 +1,105 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
 
-export const MAX_VIDEO_FILE_SIZE = 500 * 1024 * 1024;
-
-const acceptedMimeTypes = new Set([
-  "video/mp4",
-  "video/webm",
-  "video/quicktime",
-]);
-const acceptedExtensions = [".mp4", ".webm", ".mov"];
+import { getSafeHttpUrl } from "./ActionButton";
 
 export type VideoUploadValues = {
   title: string;
-  file: File;
+  videoUrl: string;
 };
 
 type VideoUploadFormProps = {
-  disabled?: boolean;
+  disabled: boolean;
   onSubmit: (values: VideoUploadValues) => Promise<void>;
 };
 
-export function validateVideoFile(file: File | null): string | null {
-  if (!file) {
-    return "Choose a video file to upload.";
-  }
-
-  if (file.size === 0) {
-    return "The selected file is empty. Choose a different video.";
-  }
-
-  if (file.size > MAX_VIDEO_FILE_SIZE) {
-    return "The selected video is larger than the 500 MB upload limit.";
-  }
-
-  const lowerCaseName = file.name.toLowerCase();
-  const hasAcceptedExtension = acceptedExtensions.some((extension) =>
-    lowerCaseName.endsWith(extension),
-  );
-
-  if (!acceptedMimeTypes.has(file.type) && !hasAcceptedExtension) {
-    return "Use an MP4, WebM, or MOV video file.";
-  }
-
-  return null;
-}
-
-export default function VideoUploadForm({
-  disabled = false,
-  onSubmit,
-}: VideoUploadFormProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+export default function VideoUploadForm({ disabled, onSubmit }: VideoUploadFormProps) {
   const [title, setTitle] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedTitle = title.trim();
-    const fileError = validateVideoFile(file);
+    setError(null);
 
+    const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       setError("Enter a title for this video.");
       return;
     }
 
-    if (fileError || !file) {
-      setError(fileError);
+    const safeUrl = getSafeHttpUrl(videoUrl);
+    if (!safeUrl) {
+      setError("Enter a valid http:// or https:// video link.");
       return;
     }
 
-    setError(null);
-
+    setIsSubmitting(true);
     try {
-      await onSubmit({ title: trimmedTitle, file });
+      await onSubmit({ title: trimmedTitle, videoUrl: safeUrl });
       setTitle("");
-      setFile(null);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-      }
-    } catch (uploadError) {
+      setVideoUrl("");
+    } catch (submitError) {
       setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "The video could not be uploaded. Please try again.",
+        submitError instanceof Error
+          ? submitError.message
+          : "The video could not be saved. Please try again.",
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <form className="space-y-4" onSubmit={handleSubmit}>
-      <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-        Video title
+    <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
+      <div>
+        <label className="block text-sm font-semibold text-slate-700" htmlFor="video-title">
+          Title
+        </label>
         <input
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-3 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100"
-          disabled={disabled}
-          maxLength={160}
+          className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          disabled={disabled || isSubmitting}
+          id="video-title"
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="Product introduction"
-          required
+          placeholder="e.g. Welcome walkthrough"
+          type="text"
           value={title}
         />
-      </label>
-      <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-        Video file
+      </div>
+
+      <div>
+        <label className="block text-sm font-semibold text-slate-700" htmlFor="video-url">
+          Video link
+        </label>
         <input
-          accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
-          className="block w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={disabled}
-          onChange={(event) => {
-            const selectedFile = event.target.files?.[0] ?? null;
-            setFile(selectedFile);
-            setError(validateVideoFile(selectedFile));
-          }}
-          ref={inputRef}
-          type="file"
+          className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          disabled={disabled || isSubmitting}
+          id="video-url"
+          onChange={(event) => setVideoUrl(event.target.value)}
+          placeholder="https://..."
+          type="url"
+          value={videoUrl}
         />
-        <span className="text-xs font-normal text-slate-500">
-          MP4, WebM, or MOV · maximum 500 MB
-        </span>
-      </label>
+        <p className="mt-1.5 text-xs text-slate-500">
+          Paste a direct video link — a hosted MP4 URL, YouTube link, Vimeo link, etc.
+        </p>
+      </div>
+
       {error ? (
         <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
           {error}
         </p>
       ) : null}
+
       <button
-        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-        disabled={disabled}
+        className="w-full rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+        disabled={disabled || isSubmitting}
         type="submit"
       >
-        Upload video
+        {isSubmitting ? "Saving…" : "Add video"}
       </button>
     </form>
   );
